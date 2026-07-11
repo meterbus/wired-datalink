@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Determine version
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          cache: pnpm
+          node-version-file: .node-version
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Compute new version
+        id: version
+        run: |
+          VERSION=$(pnpm exec git-cliff --config .github/changelog.cliff.toml --bumped-version)
+          VERSION=${VERSION#v}
+          CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "v$VERSION" = "$CURRENT_TAG" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  changelog:
+    name: Generate changelog
+    needs: version
+    if: needs.version.outputs.changed == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          cache: pnpm
+          node-version-file: .node-version
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate full changelog
+        run: |
+          pnpm exec git-cliff \
+            --config .github/changelog.cliff.toml \
+            --tag "v${{ needs.version.outputs.version }}" \
+            --output CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate release notes
+        run: |
+          pnpm exec git-cliff \
+            --config .github/release-notes.cliff.toml \
+            --unreleased \
+            --tag "v${{ needs.version.outputs.version }}" \
+            --strip all \
+            --output RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload changelog artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: changelog
+          path: |
+            CHANGELOG.md
+            RELEASE_NOTES.md
+
+  release:
+    name: Release
+    needs: [version, changelog]
+    if: needs.version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Generate release token
+        id: release-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: wired-datalink
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ steps.release-token.outputs.token }}
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Update package version
+        run: pnpm pkg set version=${{ needs.version.outputs.version }}
+      - name: Download changelog artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: changelog
+      - name: Set git user
+        run: |
+          git config user.name "meterbus-releaser[bot]"
+          git config user.email "302568171+meterbus-releaser[bot]@users.noreply.github.com"
+      - name: Create release commit and tag
+        run: |
+          git add CHANGELOG.md package.json
+          git commit -m "chore(release): v${{ needs.version.outputs.version }}"
+          git tag -a "v${{ needs.version.outputs.version }}" -m "Release v${{ needs.version.outputs.version }}"
+          git push --atomic origin HEAD:main "v${{ needs.version.outputs.version }}"
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          make_latest: true
+          body_path: RELEASE_NOTES.md

@@ -1,0 +1,15 @@
+min_version: 2.1.10
+
+pre-commit:
+  jobs:
+    - name: biome
+      glob: "*.{css,js,jsx,json,jsonc,ts,tsx}"
+      run: pnpm exec biome check {staged_files}
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: test
+      run: pnpm test --run
+    - name: typecheck
+      run: pnpm --recursive typecheck
