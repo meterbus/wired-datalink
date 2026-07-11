@@ -1,7 +1,7 @@
 {
 	"name": "@meterbus/wired-datalink",
 	"type": "module",
-	"version": "0.0.0",
+	"version": "1.0.0",
 	"description": "Wired M-Bus datalink primitives and codecs",
 	"author": "Nicolas Hedger <nicolas@hedger.ch>",
 	"license": "MIT",
