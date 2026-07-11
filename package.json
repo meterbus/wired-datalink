@@ -3,6 +3,14 @@
 	"type": "module",
 	"version": "1.0.0",
 	"description": "Wired M-Bus datalink primitives and codecs",
+	"keywords": [
+		"m-bus",
+		"meter-bus",
+		"wired-m-bus",
+		"datalink",
+		"codec",
+		"smart-metering"
+	],
 	"author": "Nicolas Hedger <nicolas@hedger.ch>",
 	"license": "MIT",
 	"homepage": "https://github.com/meterbus/wired-datalink#readme",
